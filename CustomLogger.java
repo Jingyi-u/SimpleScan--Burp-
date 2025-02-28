@@ -6,7 +6,6 @@ import burp.api.montoya.ui.editor.HttpRequestEditor;
 import burp.api.montoya.ui.editor.HttpResponseEditor;
 
 import javax.swing.*;
-import javax.swing.table.DefaultTableModel;
 import java.awt.*;
 
 import static burp.api.montoya.ui.editor.EditorOptions.READ_ONLY;
@@ -20,8 +19,9 @@ public class CustomLogger implements BurpExtension {
     @Override
     public void initialize(MontoyaApi api) {
         this.api = api;
-        api.extension().setName("Simple Scan");
-        api.logging().logToOutput("Jing");
+        api.extension().setName("SimpleScan");
+        api.logging().logToOutput("Success\n");
+        api.logging().logToOutput("github: https://github.com/Jingyi-u/SimpleScan--Burp-\n");
 
 
         MyTableModel tableModel = new MyTableModel();
@@ -95,6 +95,13 @@ public class CustomLogger implements BurpExtension {
             configModel.setSpringbootEnabled(springboot.isSelected());
         });
         rightPanel.add(springboot, gbc);
+
+        gbc.gridy++;
+        JCheckBox cors = new JCheckBox("CORS");
+        cors.addActionListener(e -> {
+            configModel.setCorsEnabled(cors.isSelected());
+        });
+        rightPanel.add(cors, gbc);
 
         // 创建左侧的主面板
         JPanel leftPanel = new JPanel(new BorderLayout());

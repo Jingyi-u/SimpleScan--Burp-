@@ -204,7 +204,7 @@ public class SpringBootScan {
 
     public boolean  getIcoHash(){
         String icoUrl = baseUrl + this.icoPath;
-        HttpRequest icoRequest = httpRequest.withPath(icoUrl).withBody("");
+        HttpRequest icoRequest = httpRequest.withPath(icoUrl).withMethod("GET").withBody("");
         HttpResponse icoResponse = montoyaApi.http().sendRequest(icoRequest).response();
         montoyaApi.logging().logToOutput(icoUrl);
 
@@ -214,7 +214,7 @@ public class SpringBootScan {
             byte[] responseBody = icoResponse.body().getBytes();
             // 计算MD5哈希
             String hash = calculateMD5(responseBody);
-            montoyaApi.logging().logToOutput(hash);
+            //montoyaApi.logging().logToOutput(hash);
             if (hash.equals(hashIco)){
                 return true;
             }
@@ -226,9 +226,10 @@ public class SpringBootScan {
 
     public boolean getPathError(){
         String errorUrl = baseUrl + this.errorPath;
-        HttpRequest errorRequest = httpRequest.withPath(errorUrl).withBody("");
+        //montoyaApi.logging().logToOutput(errorUrl);
+        HttpRequest errorRequest = httpRequest.withPath(errorUrl).withMethod("GET").withBody("");
         HttpResponse errorResponse = montoyaApi.http().sendRequest(errorRequest).response();
-        if (errorResponse.statusCode() == 200 && (errorResponse.bodyToString().contains("Whitelabel Error Page") || errorResponse.bodyToString().contains(" mapping for /error"))) {
+        if (errorResponse.statusCode() == 200 && (errorResponse.bodyToString().contains("Whitelabel Error") || errorResponse.bodyToString().contains(" mapping for /error"))) {
                return true;
         }
         return false;

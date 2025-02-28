@@ -43,6 +43,7 @@ public class MyHttpHandler implements HttpHandler {
         boolean bypass403Enabled = configModel.isBypass403Enabled();
         boolean fastjsonEnabled = configModel.isFastjsonEnabled();
         boolean springbootEnables  = configModel.isspringbootEnabled();
+        boolean corsEnabled = configModel.isCorsEnabled();
 
         if (bypass403Enabled) {
             handleBypass403(responseReceived);
@@ -53,6 +54,9 @@ public class MyHttpHandler implements HttpHandler {
         }
         if (springbootEnables) {
             handleSpringBootVulnerabilityDetection(responseReceived);
+        }
+        if (corsEnabled) {
+            handleCors(responseReceived);
         }
 
         return null;
@@ -104,22 +108,23 @@ public class MyHttpHandler implements HttpHandler {
 
     private void detectFastJsonVulnerability(HttpRequest initHttpRequest, HttpResponseReceived responseReceived) throws InterruptedException {
         int modifiedLength = 0;
-        HttpResponse modifiedResponse = null;
-        HttpRequest modifiedRequest = null;
+
 
         // FASTJSON检测逻辑，使用协作器检测
         CollaboratorClient collaboratorClient = montoyaApi.collaborator().createClient();
 
         for (String payload : fastjsonPayload) {
+            HttpResponse modifiedResponse = null;
+            HttpRequest modifiedRequest = null;
             String dnsDomain = collaboratorClient.generatePayload().toString();
             String formatPayload = String.format(payload, dnsDomain);
-            montoyaApi.logging().logToOutput("Format payload: " + formatPayload + "\n");
 
             modifiedRequest = initHttpRequest.withBody(formatPayload);
             modifiedResponse = montoyaApi.http().sendRequest(modifiedRequest).response();
             modifiedLength = modifiedResponse.body().length();
 
             Thread.sleep(2000);
+
 
             List<Interaction> interactions = collaboratorClient.getInteractions(InteractionFilter.interactionPayloadFilter(dnsDomain));
             if (interactions != null && !interactions.isEmpty()) {
@@ -131,6 +136,8 @@ public class MyHttpHandler implements HttpHandler {
 
         // 尝试检测版本信息
         for (String payloadError : fastjsonPayloadError) {
+            HttpResponse modifiedResponse = null;
+            HttpRequest modifiedRequest = null;
             modifiedRequest = initHttpRequest.withBody(payloadError);
             modifiedResponse = montoyaApi.http().sendRequest(modifiedRequest).response();
             modifiedLength = modifiedResponse.body().length();
@@ -160,7 +167,7 @@ public class MyHttpHandler implements HttpHandler {
     //springboot检测
     private void detectFastJsonVulnerability(HttpResponseReceived responseReceived) throws MalformedURLException, InterruptedException {
         HttpRequest httpRequest = responseReceived.initiatingRequest();
-        HttpResponse httpResponse = montoyaApi.http().sendRequest(httpRequest).response();
+        //HttpResponse httpResponse = montoyaApi.http().sendRequest(httpRequest).response();
         String url = httpRequest.url();
         // 使用 java.net.URL 类来解析 URL
         java.net.URL parsedUrl = new java.net.URL(url);
@@ -177,28 +184,39 @@ public class MyHttpHandler implements HttpHandler {
         //探测是否为SpringBoot框架
         SpringBootScan springBootScan = new SpringBootScan(baseUrl,httpRequest,montoyaApi);
         boolean isIcoOfSpring = springBootScan.getIcoHash();
-        montoyaApi.logging().logToOutput("isIcoOfSpring："+isIcoOfSpring);
-
         boolean pathError = springBootScan.getPathError();
 
-        montoyaApi.logging().logToOutput("pathError："+pathError);
+        //montoyaApi.logging().logToOutput("isIcoOfSpring："+isIcoOfSpring);
+        //montoyaApi.logging().logToOutput("pathError："+pathError);
 
         //如果检测到SpringBoot，进行下一步探测
         if (isIcoOfSpring || pathError) {
-            montoyaApi.logging().logToOutput("检测到Spring Boot");
+            //montoyaApi.logging().logToOutput("检测到Spring Boot");
             HashMap<HttpRequest, HttpResponse> pathRequestReponse = springBootScan.startPathScan();
             if (pathRequestReponse != null && !pathRequestReponse.isEmpty()) {
                 for (Map.Entry<HttpRequest, HttpResponse> entry : pathRequestReponse.entrySet()) {
                     HttpRequest request = entry.getKey();
                     HttpResponse response = entry.getValue();
                     int length = response.body().length();
-                    tableModel.add(new SourceLogEntry(id, responseReceived.toolSource().toolType().toolName(), null, "Find Spring Path", length, HttpRequestResponse.httpRequestResponse(request, response), request.httpService().toString(), responseReceived.initiatingRequest().pathWithoutQuery(), response.statusCode()));
+                    tableModel.add(new SourceLogEntry(id, responseReceived.toolSource().toolType().toolName(), null, "Find SpringBoot Path", length, HttpRequestResponse.httpRequestResponse(request, response), request.httpService().toString(), responseReceived.initiatingRequest().pathWithoutQuery(), response.statusCode()));
                     id++;
                 }
             }
 
         }
     }
+
+    private void handleCors(HttpResponseReceived responseReceived) {
+        HttpRequest corsHttpRequest = responseReceived.initiatingRequest();
+        corsHttpRequest.withHeader("Origin", "*");
+        HttpResponse corsResponse = montoyaApi.http().sendRequest(corsHttpRequest).response();
+        int length = corsResponse.body().length();
+        if(corsResponse.statusCode() == 200 && corsResponse.hasHeader("Access-Control-Allow-Origin","*") && corsResponse.hasHeader("Access-Control-Allow-Credentials","*")){
+            tableModel.add(new SourceLogEntry(id, responseReceived.toolSource().toolType().toolName(), null, "Find SpringBoot Path", length, HttpRequestResponse.httpRequestResponse(corsHttpRequest, corsResponse), corsHttpRequest.httpService().toString(), responseReceived.initiatingRequest().pathWithoutQuery(), corsResponse.statusCode()));
+            id++;
+        }
+    }
+
 
     public static boolean strMatch(String str, String pattern) {
         if ("json".equals(pattern)) {
