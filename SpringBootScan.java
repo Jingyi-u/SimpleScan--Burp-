@@ -239,7 +239,7 @@ public class SpringBootScan {
         HashMap<HttpRequest, HttpResponse> requestHttpResponseMap = new HashMap<>();
         //循环发送请求
         for (String path: pathOfSpringBootError){
-            String url = baseUrl + path;
+            //String url = baseUrl + path;
             HttpRequest pathRequest = httpRequest.withPath("/"+path).withMethod("GET").withBody("");
 
             HttpResponse pathResponse = montoyaApi.http().sendRequest(pathRequest).response();

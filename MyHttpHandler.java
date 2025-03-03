@@ -44,6 +44,7 @@ public class MyHttpHandler implements HttpHandler {
         boolean fastjsonEnabled = configModel.isFastjsonEnabled();
         boolean springbootEnables  = configModel.isspringbootEnabled();
         boolean corsEnabled = configModel.isCorsEnabled();
+        boolean juniorSqlEnabled = configModel.isJuniorSqlEnabled();
 
         if (bypass403Enabled) {
             handleBypass403(responseReceived);
@@ -57,6 +58,9 @@ public class MyHttpHandler implements HttpHandler {
         }
         if (corsEnabled) {
             handleCors(responseReceived);
+        }
+        if (juniorSqlEnabled) {
+            handleSQLInjectionVulnerabilityDetection(responseReceived);
         }
 
         return null;
@@ -186,8 +190,6 @@ public class MyHttpHandler implements HttpHandler {
         boolean isIcoOfSpring = springBootScan.getIcoHash();
         boolean pathError = springBootScan.getPathError();
 
-        //montoyaApi.logging().logToOutput("isIcoOfSpring："+isIcoOfSpring);
-        //montoyaApi.logging().logToOutput("pathError："+pathError);
 
         //如果检测到SpringBoot，进行下一步探测
         if (isIcoOfSpring || pathError) {
@@ -210,10 +212,42 @@ public class MyHttpHandler implements HttpHandler {
         HttpRequest corsHttpRequest = responseReceived.initiatingRequest();
         corsHttpRequest.withHeader("Origin", "*");
         HttpResponse corsResponse = montoyaApi.http().sendRequest(corsHttpRequest).response();
+        //corsHttpRequest.with
         int length = corsResponse.body().length();
         if(corsResponse.statusCode() == 200 && corsResponse.hasHeader("Access-Control-Allow-Origin","*") && corsResponse.hasHeader("Access-Control-Allow-Credentials","*")){
             tableModel.add(new SourceLogEntry(id, responseReceived.toolSource().toolType().toolName(), null, "Find SpringBoot Path", length, HttpRequestResponse.httpRequestResponse(corsHttpRequest, corsResponse), corsHttpRequest.httpService().toString(), responseReceived.initiatingRequest().pathWithoutQuery(), corsResponse.statusCode()));
             id++;
+        }
+    }
+
+    private void handleSQLInjectionVulnerabilityDetection(HttpResponseReceived responseReceived) {
+        new Thread(() -> {
+            try {
+                if (MyFilterRequest.fromProxy(responseReceived) || MyFilterRequest.fromRepeater(responseReceived)) {
+                    detectSQLInjectionVulnerability(responseReceived);
+                }
+            } catch (Exception e) {
+                // 异常处理
+                montoyaApi.logging().logToOutput("SQLInjection检测线程发生错误：" + e.getMessage());
+            }
+        }).start();
+
+    }
+    private void detectSQLInjectionVulnerability(HttpResponseReceived responseReceived) throws InterruptedException {
+        HttpRequest httpRequest = responseReceived.initiatingRequest();
+        String baseUrl = httpRequest.url();
+
+        JuniorSqlDetection juniorSqlDetection = new JuniorSqlDetection(baseUrl,httpRequest,montoyaApi);
+        HashMap<HttpRequest, HttpResponse> SqlRequestReponse = juniorSqlDetection.SqlDetection();
+
+        if (SqlRequestReponse != null && !SqlRequestReponse.isEmpty()) {
+            for (Map.Entry<HttpRequest, HttpResponse> entry : SqlRequestReponse.entrySet()) {
+                HttpRequest request = entry.getKey();
+                HttpResponse response = entry.getValue();
+                int length = response.body().length();
+                tableModel.add(new SourceLogEntry(id, responseReceived.toolSource().toolType().toolName(), null, "SQL ERROR", length, HttpRequestResponse.httpRequestResponse(request, response), request.httpService().toString(), responseReceived.initiatingRequest().pathWithoutQuery(), response.statusCode()));
+                id++;
+            }
         }
     }
 

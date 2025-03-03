@@ -3,6 +3,7 @@ public class ConfigModel {
     private volatile boolean fastjsonEnabled;
     private volatile boolean springbootEnabled;
     private volatile boolean corsEnabled;
+    private volatile boolean juniorSqlEnabled;
 
     //bypass 403
     public boolean isBypass403Enabled() {
@@ -36,8 +37,16 @@ public class ConfigModel {
         return corsEnabled;
     }
 
-    public void setCorsEnabled(boolean springbootEnabled) {
-        this.springbootEnabled = springbootEnabled;
+    public void setCorsEnabled(boolean corsEnabled) {
+        this.corsEnabled = corsEnabled;
+    }
+
+    //sql
+    public boolean isJuniorSqlEnabled(){
+        return juniorSqlEnabled;
+    }
+    public void setJuniorSqlEnabled(boolean juniorSqlEnabled) {
+        this.juniorSqlEnabled = juniorSqlEnabled;
     }
 
 }

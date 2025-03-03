@@ -21,7 +21,7 @@ public class CustomLogger implements BurpExtension {
         this.api = api;
         api.extension().setName("SimpleScan");
         api.logging().logToOutput("Success\n");
-        api.logging().logToOutput("github: https://github.com/Jingyi-u/SimpleScan--Burp-\n");
+        api.logging().logToOutput("Github: https://github.com/Jingyi-u/SimpleScan--Burp-\n");
 
 
         MyTableModel tableModel = new MyTableModel();
@@ -103,6 +103,13 @@ public class CustomLogger implements BurpExtension {
         });
         rightPanel.add(cors, gbc);
 
+        gbc.gridy++;
+        JCheckBox sql = new JCheckBox("junior SqlScan");
+        sql.addActionListener(e -> {
+            configModel.setJuniorSqlEnabled(sql.isSelected());
+        });
+        rightPanel.add(sql, gbc);
+
         // 创建左侧的主面板
         JPanel leftPanel = new JPanel(new BorderLayout());
         leftPanel.add(logScrollPane, BorderLayout.NORTH);
@@ -116,14 +123,6 @@ public class CustomLogger implements BurpExtension {
         return mainSplitPane;
     }
 
-    private static JPanel createSubPanel(String label, JCheckBox jCheckBox) {
-        JPanel jPane = new JPanel();
-        jPane.setLayout(new BoxLayout(jPane, BoxLayout.X_AXIS));
-
-        jPane.add(new JLabel(label));
-        jPane.add(jCheckBox);
-        return jPane;
-    }
 
 }
 

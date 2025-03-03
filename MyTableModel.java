@@ -7,7 +7,6 @@
  */
 
 
-import burp.api.montoya.http.handler.HttpResponseReceived;
 
 import javax.swing.table.AbstractTableModel;
 import java.util.ArrayList;
