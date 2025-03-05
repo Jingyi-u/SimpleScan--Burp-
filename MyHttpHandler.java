@@ -6,10 +6,7 @@ import burp.api.montoya.http.message.requests.HttpRequest;
 import burp.api.montoya.http.message.responses.HttpResponse;
 
 import java.net.MalformedURLException;
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 
 public class MyHttpHandler implements HttpHandler {
     private final MontoyaApi montoyaApi;
@@ -237,15 +234,24 @@ public class MyHttpHandler implements HttpHandler {
         HttpRequest httpRequest = responseReceived.initiatingRequest();
         String baseUrl = httpRequest.url();
 
+        //发送原始请求，获取最初长度用于之后长度对比
+        //HttpResponse onceResponse = montoyaApi.http().sendRequest(httpRequest).response();
+        //int onceLength = onceResponse.bodyToString().length();
+
         JuniorSqlDetection juniorSqlDetection = new JuniorSqlDetection(baseUrl,httpRequest,montoyaApi);
         HashMap<HttpRequest, HttpResponse> SqlRequestReponse = juniorSqlDetection.SqlDetection();
 
         if (SqlRequestReponse != null && !SqlRequestReponse.isEmpty()) {
             for (Map.Entry<HttpRequest, HttpResponse> entry : SqlRequestReponse.entrySet()) {
+
                 HttpRequest request = entry.getKey();
                 HttpResponse response = entry.getValue();
                 int length = response.body().length();
-                tableModel.add(new SourceLogEntry(id, responseReceived.toolSource().toolType().toolName(), null, "SQL ERROR", length, HttpRequestResponse.httpRequestResponse(request, response), request.httpService().toString(), responseReceived.initiatingRequest().pathWithoutQuery(), response.statusCode()));
+
+                //montoyaApi.logging().logToOutput(getLengthDiff(request));
+                String lengthDiff = getLengthDiff(request);
+
+                tableModel.add(new SourceLogEntry(id, responseReceived.toolSource().toolType().toolName(), null, "SQL ERROR, Len Change: "+lengthDiff, length, HttpRequestResponse.httpRequestResponse(request, response), request.httpService().toString(), responseReceived.initiatingRequest().pathWithoutQuery(), response.statusCode()));
                 id++;
             }
         }
@@ -257,5 +263,8 @@ public class MyHttpHandler implements HttpHandler {
             return str.contains("{") && str.contains("}");
         }
         return false;
+    }
+    public static String getLengthDiff(HttpRequest request) {
+        return request.headerValue("X-Length-Diff");
     }
 }
