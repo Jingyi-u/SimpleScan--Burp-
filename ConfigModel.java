@@ -4,6 +4,7 @@ public class ConfigModel {
     private volatile boolean springbootEnabled;
     private volatile boolean corsEnabled;
     private volatile boolean juniorSqlEnabled;
+    private volatile boolean findSecretEnabled;
 
     //bypass 403
     public boolean isBypass403Enabled() {
@@ -49,4 +50,10 @@ public class ConfigModel {
         this.juniorSqlEnabled = juniorSqlEnabled;
     }
 
+    public boolean isFindSecretEnabled() {
+        return findSecretEnabled;
+    }
+    public void setFindSecretEnabled(boolean findSecretEnabled) {
+        this.findSecretEnabled = findSecretEnabled;
+    }
 }
