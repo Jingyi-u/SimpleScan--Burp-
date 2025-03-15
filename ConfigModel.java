@@ -5,6 +5,7 @@ public class ConfigModel {
     private volatile boolean corsEnabled;
     private volatile boolean juniorSqlEnabled;
     private volatile boolean findSecretEnabled;
+    private volatile boolean scanForAuthorizationEnabled;
 
     //bypass 403
     public boolean isBypass403Enabled() {
@@ -55,5 +56,13 @@ public class ConfigModel {
     }
     public void setFindSecretEnabled(boolean findSecretEnabled) {
         this.findSecretEnabled = findSecretEnabled;
+    }
+
+    public boolean isScanForAuthorizationEnabled() {
+        return scanForAuthorizationEnabled;
+    }
+
+    public void setScanForAuthorizationEnabled(boolean scanForAuthorizationEnabled) {
+        this.scanForAuthorizationEnabled = scanForAuthorizationEnabled;
     }
 }

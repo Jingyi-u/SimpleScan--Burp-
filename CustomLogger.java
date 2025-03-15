@@ -117,6 +117,13 @@ public class CustomLogger implements BurpExtension {
         });
         rightPanel.add(secret, gbc);
 
+        gbc.gridy++;
+        JCheckBox authorization = new JCheckBox("scan For Authorization");
+        secret.addActionListener(e -> {
+            configModel.setScanForAuthorizationEnabled(authorization.isSelected());
+        });
+        rightPanel.add(authorization, gbc);
+
         // 创建左侧的主面板
         JPanel leftPanel = new JPanel(new BorderLayout());
         leftPanel.add(logScrollPane, BorderLayout.NORTH);

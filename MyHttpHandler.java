@@ -47,6 +47,7 @@ public class MyHttpHandler implements HttpHandler {
         boolean corsEnabled = configModel.isCorsEnabled();
         boolean juniorSqlEnabled = configModel.isJuniorSqlEnabled();
         boolean findSecretEnabled = configModel.isFindSecretEnabled();
+        boolean scanForAuthorizationEnabled = configModel.isScanForAuthorizationEnabled();
 
         if (bypass403Enabled) {
             submitTask(() -> handleBypass403VulnerabilityDetection(responseReceived));
@@ -70,6 +71,10 @@ public class MyHttpHandler implements HttpHandler {
 
         if (findSecretEnabled) {
             submitTask(() -> handleFindSecretVulnerabilityDetection(responseReceived));
+        }
+
+        if (scanForAuthorizationEnabled){
+            submitTask(() -> handleScanForAuthorizationVulnerabilityDetection(responseReceived));
         }
 
 
@@ -284,6 +289,7 @@ public class MyHttpHandler implements HttpHandler {
             FindSecretVulnerability(responseReceived);
         }
     }
+
     private void FindSecretVulnerability(HttpResponseReceived responseReceived) {
         HttpRequest firstHttpRequest = responseReceived.initiatingRequest();
         //String baseUrl = firstHttpRequest.url();
@@ -301,6 +307,27 @@ public class MyHttpHandler implements HttpHandler {
                         "Sensitive Information Detected: " + sensitiveInfo
                 );
             }
+        }
+    }
+
+    private void handleScanForAuthorizationVulnerabilityDetection(HttpResponseReceived responseReceived) {
+        if (MyFilterRequest.fromProxy(responseReceived) || MyFilterRequest.fromRepeater(responseReceived)) {
+            ScanForAuthorizationVulnerability(responseReceived);
+        }
+    }
+
+    private void ScanForAuthorizationVulnerability(HttpResponseReceived responseReceived) {
+        HttpRequest httpRequest = responseReceived.initiatingRequest();
+        String baseUrl = httpRequest.url();
+        HttpResponse response = montoyaApi.http().sendRequest(httpRequest).response();
+        ScanForAuthorization scanForAuthorization = new ScanForAuthorization(baseUrl, httpRequest, montoyaApi);
+        if (scanForAuthorization.scanForAuthorizationVulnerabilities()){
+            logVulnerability(
+                    responseReceived,
+                    httpRequest,
+                    response,
+                    "Potential authorization vulnerability detected! "
+            );
         }
     }
 
